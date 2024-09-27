@@ -20,7 +20,7 @@ jobs:
         password: "${{ secrets.REGISTRY_PASSWORD }}" # 引用GitHub repo设置的镜像容器服务密码
     - name: Build and Push Docker Image
       env:
-        IMAGE_TAG: ${{ github.run_number }} # 用于标记容器版本号
+        IMAGE_TAG: latest # 用于标记容器版本号
       run: |
         docker build -t registry.cn-hangzhou.aliyuncs.com/starfishes/zhenxun-docker:$IMAGE_TAG .
         docker push registry.cn-hangzhou.aliyuncs.com/starfishes/zhenxun-docker:$IMAGE_TAG
