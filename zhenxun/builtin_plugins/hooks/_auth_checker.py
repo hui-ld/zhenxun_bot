@@ -11,6 +11,7 @@ from zhenxun.services.log import logger
 from zhenxun.configs.config import Config
 from zhenxun.utils.message import MessageUtils
 from zhenxun.models.level_user import LevelUser
+from zhenxun.models.bot_console import BotConsole
 from zhenxun.models.plugin_info import PluginInfo
 from zhenxun.models.plugin_limit import PluginLimit
 from zhenxun.models.user_console import UserConsole
@@ -116,7 +117,7 @@ class LimitManage:
     @classmethod
     async def __check(
         cls,
-        limit_model: Limit,
+        limit_model: Limit | None,
         user_id: str,
         group_id: str | None,
         channel_id: str | None,
@@ -234,7 +235,10 @@ class AuthChecker:
                 return
             if plugin := await PluginInfo.get_or_none(module_path=module_path):
                 if plugin.plugin_type == PluginType.HIDDEN:
-                    logger.debug("插件为HIDDEN，已跳过...")
+                    logger.debug(
+                        f"插件: {plugin.name}:{plugin.module} "
+                        "为HIDDEN，已跳过权限检查..."
+                    )
                     return
                 try:
                     cost_gold = await self.auth_cost(user, plugin, session)
@@ -244,6 +248,7 @@ class AuthChecker:
                         if not plugin.limit_superuser:
                             cost_gold = 0
                             raise IsSuperuserException()
+                    await self.auth_bot(plugin, bot.self_id)
                     await self.auth_group(plugin, session, message)
                     await self.auth_admin(plugin, session)
                     await self.auth_plugin(plugin, session, event)
@@ -278,6 +283,16 @@ class AuthChecker:
         if is_ignore:
             raise IgnoredException("权限检测 ignore")
 
+    async def auth_bot(self, plugin: PluginInfo, bot_id: str):
+        """机器人权限
+
+        参数:
+            plugin: PluginInfo
+            bot_id: bot_id
+        """
+        if await BotConsole.is_block_plugin(plugin.module, bot_id):
+            raise IgnoredException("机器人权限检测 ignore")
+
     async def auth_limit(self, plugin: PluginInfo, session: EventSession):
         """插件限制
 
@@ -291,7 +306,9 @@ class AuthChecker:
         if not group_id:
             group_id = channel_id
             channel_id = None
-        limit_list: list[PluginLimit] = await plugin.plugin_limit.all()  # type: ignore
+        limit_list: list[PluginLimit] = await plugin.plugin_limit.filter(
+            status=True
+        ).all()  # type: ignore
         for limit in limit_list:
             LimitManage.add_limit(limit)
         if user_id:
@@ -317,8 +334,8 @@ class AuthChecker:
             is_poke = isinstance(event, PokeNotifyEvent)
             if group_id:
                 sid = group_id or user_id
-                if await GroupConsole.is_super_block_plugin(
-                    group_id, plugin.module, channel_id
+                if await GroupConsole.is_superuser_block_plugin(
+                    group_id, plugin.module
                 ):
                     """超级用户群组插件状态"""
                     if self.is_send_limit_message(plugin, sid) and not is_poke:
@@ -332,9 +349,7 @@ class AuthChecker:
                         session=session,
                     )
                     raise IgnoredException("超级管理员禁用了该群此功能...")
-                if await GroupConsole.is_block_plugin(
-                    group_id, plugin.module, channel_id
-                ):
+                if await GroupConsole.is_normal_block_plugin(group_id, plugin.module):
                     """群组插件状态"""
                     if self.is_send_limit_message(plugin, sid) and not is_poke:
                         self._flmt_s.start_cd(group_id or user_id)
